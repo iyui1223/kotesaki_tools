@@ -1,0 +1,82 @@
+# Climatology variable definitions
+# Each entry: variable ID, input path pattern, pressure levels (if applicable), NetCDF var name
+
+variables:
+  Z500:
+    name: geopotential
+    data_subdir: geopotential/nc
+    file_pattern: "era5_daily_geopotential_{year}_{month:02d}.nc"
+    file_format: monthly  # monthly or yearly
+    levels: [500]
+    nc_var: z
+    level_var: level  # NetCDF level dimension name
+    output_var: z
+
+  T2m:
+    name: 2m_temperature
+    data_subdir: 2m_temperature/nc
+    file_pattern: "era5_daily_2m_temperature_{year}.nc"
+    file_format: yearly
+    levels: null
+    nc_var: t2m
+    output_var: t2m
+
+  U850:
+    name: u_component_of_wind
+    data_subdir: u_component_of_wind/nc
+    file_pattern: "era5_daily_u_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [850]
+    nc_var: u
+    level_var: level
+    output_var: u
+
+  U500:
+    name: u_component_of_wind
+    data_subdir: u_component_of_wind/nc
+    file_pattern: "era5_daily_u_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [500]
+    nc_var: u
+    level_var: level
+    output_var: u
+
+  U200:
+    name: u_component_of_wind
+    data_subdir: u_component_of_wind/nc
+    file_pattern: "era5_daily_u_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [200]
+    nc_var: u
+    level_var: level
+    output_var: u
+
+  V850:
+    name: v_component_of_wind
+    data_subdir: v_component_of_wind/nc
+    file_pattern: "era5_daily_v_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [850]
+    nc_var: v
+    level_var: level
+    output_var: v
+
+  V500:
+    name: v_component_of_wind
+    data_subdir: v_component_of_wind/nc
+    file_pattern: "era5_daily_v_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [500]
+    nc_var: v
+    level_var: level
+    output_var: v
+
+  V200:
+    name: v_component_of_wind
+    data_subdir: v_component_of_wind/nc
+    file_pattern: "era5_daily_v_component_of_wind_{year}.nc"
+    file_format: yearly
+    levels: [200]
+    nc_var: v
+    level_var: level
+    output_var: v
