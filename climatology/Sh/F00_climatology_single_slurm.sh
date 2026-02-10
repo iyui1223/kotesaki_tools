@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=clim
-#SBATCH --output=/lustre/soge1/projects/andante/cenv1201/scripts/kotesaki_tools/climatology/Log/clim_%x.out
-#SBATCH --error=/lustre/soge1/projects/andante/cenv1201/scripts/kotesaki_tools/climatology/Log/clim_%x.err
+#SBATCH --output=/lustre/soge1/projects/andante/cenv1201/scripts/kotesaki_tools/climatology/Log/clim_T2m.out
+#SBATCH --error=/lustre/soge1/projects/andante/cenv1201/scripts/kotesaki_tools/climatology/Log/clim_T2m.err
 #SBATCH --partition=Medium
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #
 # Single-variable climatology job.
 # Submit via run_all_climatologies.sh which replaces %v with variable ID.

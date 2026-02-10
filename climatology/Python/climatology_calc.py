@@ -3,9 +3,9 @@
 Climatology calculation with Lanczos low-pass filtering (Duchon 1979).
 
 Computes smooth daily climatological normals:
-  1. Average daily values over base period for each day-of-year (excl. leap days)
+  1. Accumulate daily values year-by-year for each day-of-year (excl. Feb 29)
   2. Apply Lanczos filter (121-term, 60-day cutoff) with circular boundary
-  3. Derive leap-day value from Feb 28 and Mar 1
+  3. Derive leap-day value from smoothed Feb 28 and Mar 1
   4. Write NetCDF with climatological time axis (year 1900)
 """
 
@@ -74,73 +74,52 @@ def day_of_year_365(dates: xr.DataArray) -> tuple[xr.DataArray, xr.DataArray]:
     return doy_365, valid
 
 
-def doy_to_date_1900(doy: int) -> np.datetime64:
-    """Convert day-of-year (1-366) to datetime64 in year 1900 for climatology."""
-    return np.datetime64("1900-01-01") + np.timedelta64(doy - 1, "D")
+def doy_to_clim_date(doy: int) -> np.datetime64:
+    """Convert day-of-year (1-366) to datetime64 in year 2000 for climatology.
+
+    Year 2000 is used because it is a leap year (366 days).
+    """
+    return np.datetime64("2000-01-01") + np.timedelta64(doy - 1, "D")
 
 
 # -----------------------------------------------------------------------------
-# I/O helpers
+# File discovery
 # -----------------------------------------------------------------------------
-def load_and_aggregate(
-    file_list: list[Path],
-    var: str,
-    level_var: str | None,
-    levels: list[int] | None,
-) -> xr.DataArray:
-    """Load NetCDF files, select single level if needed, return chunked DataArray."""
-    ds = xr.open_mfdataset(
-        [str(p) for p in file_list],
-        combine="by_coords",
-        chunks={"time": 365},
-        parallel=True,
-    )
-    da = ds[var]
-    if levels is not None and level_var and level_var in ds.dims:
-        # Select as scalar to squeeze out the level dimension entirely,
-        # so we work with (time, lat, lon) not (time, 1, lat, lon).
-        if len(levels) == 1:
-            da = da.sel({level_var: levels[0]})
-        else:
-            da = da.sel({level_var: levels})
-    print(f"  Loaded: {da.dims}, shape={da.shape}, chunks={da.chunks}")
-    return da
-
-
-def build_file_list(
+def build_file_list_by_year(
     base_dir: Path,
     pattern: str,
     file_format: str,
     start_year: int,
     end_year: int,
-) -> tuple[list[Path], list[Path]]:
+) -> tuple[dict[int, list[Path]], list[Path]]:
     """
-    Build list of input files from pattern and year range.
+    Build dict of year -> file list, plus list of truly missing paths.
 
-    Returns (found, missing) where missing only contains paths
-    that could not be resolved by either direct match or glob.
+    Returns (files_by_year, missing).
     """
-    files: list[Path] = []
+    files_by_year: dict[int, list[Path]] = {}
     missing: list[Path] = []
-    if file_format == "yearly":
-        for y in range(start_year, end_year + 1):
+
+    for y in range(start_year, end_year + 1):
+        year_files: list[Path] = []
+
+        if file_format == "yearly":
             p = base_dir / pattern.format(year=y)
             if p.exists():
-                files.append(p)
+                year_files.append(p)
             else:
-                g = list(base_dir.glob(pattern.replace("{year}", str(y))))
+                g = sorted(base_dir.glob(pattern.replace("{year}", str(y))))
                 if g:
-                    files.extend(g)
+                    year_files.extend(g)
                 else:
                     missing.append(p)
-    else:
-        for y in range(start_year, end_year + 1):
+        else:  # monthly
             for m in range(1, 13):
                 p = base_dir / pattern.format(year=y, month=m)
                 if p.exists():
-                    files.append(p)
+                    year_files.append(p)
                 else:
-                    g = list(
+                    g = sorted(
                         base_dir.glob(
                             pattern.replace("{year}", str(y)).replace(
                                 "{month:02d}", f"{m:02d}"
@@ -148,29 +127,24 @@ def build_file_list(
                         )
                     )
                     if g:
-                        files.extend(g)
+                        year_files.extend(g)
                     else:
                         missing.append(p)
-    return sorted(set(files)), missing
 
+        if year_files:
+            files_by_year[y] = sorted(set(year_files))
 
-def write_climatology(
-    da: xr.DataArray,
-    out_path: Path,
-    var_name: str,
-) -> None:
-    """Write climatology to NetCDF with climatological time axis (year 1900)."""
-    ds = da.to_dataset(name=var_name)
-    ds.time.attrs["calendar"] = "366_day"
-    ds.time.attrs["axis"] = "T"
-    ds.to_netcdf(out_path)
+    return files_by_year, missing
 
 
 # -----------------------------------------------------------------------------
-# Climatology computation
+# Climatology computation (year-by-year accumulation)
 # -----------------------------------------------------------------------------
 def compute_climatology(
-    da: xr.DataArray,
+    files_by_year: dict[int, list[Path]],
+    var: str,
+    level_var: str | None,
+    level: int | None,
     n_lanczos: int = 60,
     fc: float = 1.0 / 60.0,
 ) -> xr.DataArray:
@@ -178,60 +152,118 @@ def compute_climatology(
     Compute smooth daily climatological normals.
 
     Steps (following JMA / JRA-3Q operational practice):
-      1. Average daily values by day-of-year (1..365), excluding Feb 29.
+      1. Accumulate daily values year-by-year for DOY 1..365, excluding Feb 29.
+         Only one year is in memory at a time.
       2. Apply Lanczos low-pass filter with circular boundary.
       3. Insert leap day as mean of smoothed Feb 28 and Mar 1.
 
     Parameters
     ----------
-    da : xr.DataArray
-        Input daily data with a 'time' dimension.
+    files_by_year : dict[int, list[Path]]
+        Mapping from year to list of NetCDF file paths.
+    var : str
+        NetCDF variable name to read.
+    level_var : str or None
+        Name of the pressure level dimension, if applicable.
+    level : int or None
+        Single pressure level to select, if applicable.
     n_lanczos : int
         Half-window length (default 60 -> 121-term filter).
     fc : float
         Cutoff frequency in cycles per sample (default 1/60).
     """
-    time_dim = "time"
-    if time_dim not in da.dims:
-        raise ValueError(f"No 'time' dimension in DataArray: {da.dims}")
+    # --- Step 1: Year-by-year accumulation ---
+    doy_sum: np.ndarray | None = None
+    n_years = 0
+    template_da: xr.DataArray | None = None
 
-    # --- Step 1: DOY average (dask-friendly via xarray groupby) ---
-    doy_365, valid = day_of_year_365(da[time_dim])
-    da_valid = da.where(valid, drop=True)
-    doy_365 = doy_365.where(valid, drop=True).rename("doy")
-    da_valid = da_valid.assign_coords(doy=doy_365)
+    for year in sorted(files_by_year):
+        print(f"  Processing {year}...")
+        ds = xr.open_mfdataset(
+            [str(p) for p in files_by_year[year]],
+            combine="by_coords",
+        )
+        da = ds[var]
+        if level is not None and level_var and level_var in ds.dims:
+            da = da.sel({level_var: level})
 
-    print("  Computing DOY means (1..365)...")
-    clim_raw = da_valid.groupby("doy").mean(time_dim, skipna=True)
-    clim_raw = clim_raw.load()  # materialize: only 365 slices, fits in memory
-    clim_raw = clim_raw.assign_coords(doy=np.arange(1, 366))
+        # Drop Feb 29, load single year into memory
+        _, valid = day_of_year_365(da.time)
+        da_valid = da.where(valid, drop=True).load()
+
+        ntime = da_valid.sizes["time"]
+        if ntime != 365:
+            print(
+                f"  WARNING: year {year} has {ntime} valid days "
+                f"(expected 365), skipping.",
+                file=sys.stderr,
+            )
+            ds.close()
+            continue
+
+        if doy_sum is None:
+            doy_sum = da_valid.values.astype(np.float64)
+            # Save a single-timestep slice for coords/dims reconstruction
+            template_da = da_valid.isel(time=0, drop=False)
+        else:
+            doy_sum += da_valid.values.astype(np.float64)
+
+        n_years += 1
+        ds.close()
+
+    if doy_sum is None or n_years == 0:
+        raise RuntimeError("No valid years processed.")
+
+    print(f"  Averaged over {n_years} years.")
+    clim_raw = doy_sum / n_years  # shape: (365, ...)
 
     # --- Step 2: Lanczos filter with circular (wrap) boundary ---
     w = lanczos_weights(n_lanczos, fc)
-    doy_axis = clim_raw.dims.index("doy")
-    clim_smooth_values = convolve1d(
-        clim_raw.values.astype(np.float64), w, axis=doy_axis, mode="wrap"
-    )
-    clim_smooth = clim_raw.copy(data=clim_smooth_values)
+    clim_smooth = convolve1d(clim_raw, w, axis=0, mode="wrap")
 
     # --- Step 3: Insert leap day = mean(Feb 28, Mar 1) ---
-    leap = 0.5 * (clim_smooth.sel(doy=59) + clim_smooth.sel(doy=60))
-    leap = leap.expand_dims({"doy": [60]})
-    pre = clim_smooth.sel(doy=slice(1, 59))
-    post = clim_smooth.sel(doy=slice(60, 365))
-    clim_366 = xr.concat(
-        [pre, leap, post], dim="doy", coords="minimal", compat="override"
-    )
-    clim_366 = clim_366.assign_coords(doy=np.arange(1, 367))
+    # Index 58 = DOY 59 = Feb 28, index 59 = DOY 60 = Mar 1
+    leap = 0.5 * (clim_smooth[58] + clim_smooth[59])
+    clim_366 = np.concatenate(
+        [clim_smooth[:59], leap[np.newaxis], clim_smooth[59:]],
+        axis=0,
+    )  # shape: (366, ...)
 
-    # --- Build climatological time axis (year 1900) ---
+    # --- Build output DataArray with climatological time axis ---
     time_clim = np.array(
-        [doy_to_date_1900(d) for d in range(1, 367)],
+        [doy_to_clim_date(d) for d in range(1, 367)],
         dtype="datetime64[ns]",
     )
-    clim_366 = clim_366.rename({"doy": time_dim})
-    clim_366 = clim_366.assign_coords({time_dim: time_clim})
-    return clim_366
+    spatial_coords = {
+        k: v for k, v in template_da.coords.items() if k != "time"
+    }
+    spatial_dims = [d for d in template_da.dims if d != "time"]
+
+    return xr.DataArray(
+        clim_366,
+        dims=["time"] + spatial_dims,
+        coords={"time": time_clim, **spatial_coords},
+        attrs=template_da.attrs,
+        name=template_da.name,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+def write_climatology(
+    da: xr.DataArray,
+    out_path: Path,
+    var_name: str,
+) -> None:
+    """Write climatology as plain NetCDF (year 2000 dates, standard calendar).
+
+    The output is a regular NetCDF with 366 daily time steps spanning
+    2000-01-01 to 2000-12-31.  GrADS should interpret it as climatological
+    via a companion .ctl descriptor (see write_grads_ctl).
+    """
+    ds = da.to_dataset(name=var_name)
+    ds.to_netcdf(out_path)
 
 
 # -----------------------------------------------------------------------------
@@ -308,8 +340,8 @@ def main() -> int:
     )
     base_dir = era5_root / vcfg["data_subdir"]
 
-    # Build file list
-    files, missing = build_file_list(
+    # Build file list grouped by year
+    files_by_year, missing = build_file_list_by_year(
         base_dir, vcfg["file_pattern"], vcfg["file_format"],
         args.start_year, args.end_year,
     )
@@ -321,7 +353,7 @@ def main() -> int:
         if len(missing) > 10:
             print(f"  ... and {len(missing) - 10} more", file=sys.stderr)
 
-    if not files:
+    if not files_by_year:
         print(
             f"ERROR: No input files found in {base_dir} "
             f"for {args.start_year}-{args.end_year}",
@@ -329,26 +361,31 @@ def main() -> int:
         )
         return 1
 
+    all_files = [f for flist in files_by_year.values() for f in flist]
+    print(f"Variable: {args.var_id}")
+    print(f"Years: {min(files_by_year)}-{max(files_by_year)} ({len(files_by_year)} years)")
+    print(f"Files: {len(all_files)} total")
+
     if args.dry_run:
-        print(f"Dry run for {args.var_id}")
-        print(f"Base dir: {base_dir}")
-        print(f"Found {len(files)} files (first 10):")
-        for p in files[:10]:
+        print(f"\nDry run — found {len(all_files)} files (first 10):")
+        for p in all_files[:10]:
             print(f"  - {p}")
-        if len(files) > 10:
-            print(f"  ... and {len(files) - 10} more")
+        if len(all_files) > 10:
+            print(f"  ... and {len(all_files) - 10} more")
         return 0
 
-    # Load
-    da = load_and_aggregate(
-        files,
+    # Resolve single level (squeeze level dim for single-level variables)
+    levels = vcfg.get("levels")
+    level = levels[0] if levels and len(levels) == 1 else None
+
+    # Compute climatology (year-by-year, low memory)
+    clim = compute_climatology(
+        files_by_year,
         vcfg["nc_var"],
         vcfg.get("level_var"),
-        vcfg.get("levels"),
+        level,
+        n_lanczos=args.n_lanczos,
     )
-
-    # Compute climatology
-    clim = compute_climatology(da, n_lanczos=args.n_lanczos)
 
     # Output path
     out_path = (
