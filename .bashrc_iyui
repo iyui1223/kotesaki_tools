@@ -81,6 +81,21 @@ function extract () {
  }
 export -f extract
 
+# make-shift write protection for crontab
+crontab() {
+    if [ "$1" = "-r" ]; then
+        echo "WARNING: This will permanently remove your crontab."
+        read -p "Type 'DELETE' to confirm: " confirm
+        if [ "$confirm" = "DELETE" ]; then
+            command crontab -r
+        else
+            echo "Aborted."
+        fi
+    else
+        command crontab "$@"
+    fi
+}
+
 # instead of cd ../../../ just type up 3
 function up(){
   local d=""
