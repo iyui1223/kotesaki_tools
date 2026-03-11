@@ -94,7 +94,17 @@ project_root/
 ````
 
 ### Naming conventions
-
+* **General rule for easier typing**:
+   * Only use the FXX_ header for top-level, user-invoked shell scripts.
+   
+   Why:
+   * If many files share the same starting character, tab-completion must disambiguate more characters, increasing typing. 
+   * When scanning a directory, the FXX_ entries quickly show which files are steps vs helpers — making the call tree obvious.
+   Tolerances & exceptions:
+   * Two duplicates of the same step are tolerable (for example, for the user ivocative script and its slurm wrapper):
+       * F01_preprocess_slurm.sh
+       * F01_preprocess.sh
+   
 * **Steps**: `FXX_shortname`
 
   * `XX` = two-digit integer (`00`, `01`, `02`, …)
@@ -134,6 +144,7 @@ project_root/
 
     * `Work/FXX_shortname/`
     * `Work/FXX_shortname/out/`
+
 
 ---
 
