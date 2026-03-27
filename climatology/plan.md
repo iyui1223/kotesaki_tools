@@ -1,14 +1,23 @@
-## GRIB-First Climatology Refactor Plan (Hybrid `wgrib2` + `CDO` + Python)
+## GRIB-First Climatology Refactor Plan (Hybrid `eccode` + `CDO` + Python)
 
 ### Summary
 Refactor the current monolithic Python workflow into a two-stage production pipeline:
 1) build reusable **unsmoothed daily climatology mid-files** (1990–2020) from GRIB inputs, and  
 2) apply optional smoothing/filter products in a separate step.  
-Tool split: `wgrib2` for fast GRIB slicing, `CDO` for heavy temporal aggregation and format handling, Python for orchestration, leap-day logic, metadata, and configurable filter plugins.
+Tool split: `eccode` for fast GRIB slicing, `CDO` for heavy temporal aggregation and format handling, Python for orchestration, leap-day logic, metadata, and configurable filter plugins.
+currently miniconda based venv with eccode is available at 
+conda activate grib_env.
+Install additional tools for python to perform the filtering in that venv.
+
+
+We need both grib and nc handling -- this is because the admin decided that we may want to switchc to grib and netcdf data will soon all be discarded. (no one knows when exactly, and lots of grib/netcdf files are incomplete -- sadly we are asked to combine dual inputs at hand to do any kind of data analysis which is infinitely stupid chaos -- but we can still plan to make it at least work for environment with grib. Certain variables are more complete in nc, whereas others grib has better availability -- unfortunately chaos dominates everything) Probably climatology directory may want to be kept this way, but another clomatology_grib/ dir to take over later should be initiated for the new grib based workflow.
+
+Here are the changes from the current nc based work flow, which not just is about input format change, but some improvements of efficiency and modularity.
 
 ### Implementation Changes
 1. **Pipeline architecture**
-- Stage A (`build_mid`): produce NetCDF mid-files keyed by `variable × time_of_day × level` for each day-of-year.
+- Stage A (`build_mid`): produce NetCDF mid-files keyed by `variable × time_of_day × level` for each day-of-year. That way each day/level/time_of_day process can be pararellized and more faster to execute.
+
 - Stage B (`build_product`): combine selected mid-files and apply optional filters (Lanczos first, extensible to alternatives).
 - Keep Stage A unsmoothed by default so future climatology definitions do not require re-reading all GRIB archives.
 
