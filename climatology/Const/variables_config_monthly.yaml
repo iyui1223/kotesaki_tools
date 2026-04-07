@@ -1,0 +1,18 @@
+# Monthly climatology variable definitions (GRIB-first)
+# WMO baseline defaults: 1991-2020
+
+monthly:
+  variable_id: T
+  name: temperature
+  data_subdir: temperature/grb
+  file_pattern: "era5_monthly_temperature_{year}{month:02d}.grb"
+
+  # GRIB selectors
+  short_name: t
+  type_of_level: isobaricInPa
+
+  # Requested pressure levels
+  levels_hpa: [100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+  levels_pa:  [10000, 15000, 20000, 25000, 30000, 40000, 50000, 60000, 70000, 85000, 92500, 100000]
+
+  output_var: t

@@ -15,7 +15,8 @@ ROOT_DIR="/lustre/soge1/projects/andante/cenv1201/scripts/kotesaki_tools/climato
 LOG_DIR="${ROOT_DIR}/Log"
 mkdir -p "${LOG_DIR}"
 
-VARS=(Z500 T2m U850 U500 U200 V850 V500 V200)
+# VARS=(Z500 T2m U850 U500 U200 V850 V500 V200 T850 T500 T200 D2m)
+VARS=(T850 T500 T200)
 if [[ $# -gt 0 ]]; then
     VARS=("$@")
 fi

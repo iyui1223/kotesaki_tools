@@ -80,3 +80,42 @@ variables:
     nc_var: v
     level_var: level
     output_var: v
+
+  T850:
+    name: temperature
+    data_subdir: temperature/nc
+    file_pattern: "era5_daily_temperature_{year}_{month:02d}.nc"
+    file_format: monthly
+    levels: [850]
+    nc_var: t
+    level_var: level
+    output_var: t
+
+  T500:
+    name: temperature
+    data_subdir: temperature/nc
+    file_pattern: "era5_daily_temperature_{year}_{month:02d}.nc"
+    file_format: monthly
+    levels: [500]
+    nc_var: t
+    level_var: level
+    output_var: t
+
+  T200:
+    name: temperature
+    data_subdir: temperature/nc
+    file_pattern: "era5_daily_temperature_{year}_{month:02d}.nc"
+    file_format: monthly
+    levels: [200]
+    nc_var: t
+    level_var: level
+    output_var: t
+
+  D2m:
+    name: 2m_dewpoint_temperature
+    data_subdir: 2m_dewpoint_temperature/nc
+    file_pattern: "era5_daily_2m_dewpoint_temperature_{year}.nc"
+    file_format: yearly
+    levels: null
+    nc_var: d2m
+    output_var: d2m

@@ -12,6 +12,7 @@ Computes smooth daily climatological normals:
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import sys
 from pathlib import Path
@@ -201,25 +202,32 @@ def compute_climatology(
             ds.close()
             continue
 
+        year_data = da_valid.values.astype(np.float64)
         if doy_sum is None:
-            doy_sum = da_valid.values.astype(np.float64)
-            # Save a single-timestep slice for coords/dims reconstruction
-            template_da = da_valid.isel(time=0, drop=False)
+            doy_sum = year_data
+            # Save a single-timestep slice for coords/dims reconstruction (no full-year data)
+            template_da = da_valid.isel(time=0, drop=False).copy(deep=True)
         else:
-            doy_sum += da_valid.values.astype(np.float64)
-
-        n_years += 1
+            doy_sum += year_data
+        del year_data, da_valid, da
         ds.close()
+        del ds
+        gc.collect()
+        n_years += 1
 
     if doy_sum is None or n_years == 0:
         raise RuntimeError("No valid years processed.")
 
     print(f"  Averaged over {n_years} years.")
     clim_raw = doy_sum / n_years  # shape: (365, ...)
+    del doy_sum
+    gc.collect()
 
     # --- Step 2: Lanczos filter with circular (wrap) boundary ---
     w = lanczos_weights(n_lanczos, fc)
     clim_smooth = convolve1d(clim_raw, w, axis=0, mode="wrap")
+    del clim_raw
+    gc.collect()
 
     # --- Step 3: Insert leap day = mean(Feb 28, Mar 1) ---
     # Index 58 = DOY 59 = Feb 28, index 59 = DOY 60 = Mar 1
@@ -228,6 +236,8 @@ def compute_climatology(
         [clim_smooth[:59], leap[np.newaxis], clim_smooth[59:]],
         axis=0,
     )  # shape: (366, ...)
+    del clim_smooth
+    gc.collect()
 
     # --- Build output DataArray with climatological time axis ---
     time_clim = np.array(
@@ -275,7 +285,7 @@ def main() -> int:
     )
     parser.add_argument(
         "var_id",
-        choices=["Z500", "T2m", "U850", "U500", "U200", "V850", "V500", "V200"],
+        choices=["Z500", "T2m", "U850", "U500", "U200", "V850", "V500", "V200", "T850", "T500", "T200"],
         help="Variable ID (as defined in variables_config.yaml)",
     )
     parser.add_argument(
